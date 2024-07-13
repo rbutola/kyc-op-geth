@@ -22,7 +22,10 @@ import (
 	"math"
 	"math/big"
 	"sort"
+	"strings"
+	"fmt"
 	"sync"
+	         "runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +41,13 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
+
+
+	flog "log"
+	"context"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 const (
@@ -269,6 +279,7 @@ func New(config Config, chain BlockChain) *LegacyPool {
 		initDoneCh:      make(chan struct{}),
 	}
 	pool.locals = newAccountSet(pool.signer)
+	fmt.Println("DISCO KING 52")
 	for _, addr := range config.Locals {
 		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
@@ -705,6 +716,31 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction, local bool) error {
 // added to the allowlist, preventing any associated transaction from being dropped
 // out of the pool due to pricing constraints.
 func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, err error) {
+
+	fromPp, _ := types.Sender(pool.signer, tx)
+
+	fmt.Println("DISCO KING GOT IT I AM GOING BACK - these are my to and from", tx.To(),fromPp)
+	// try sending an error from here:
+	// Now make an on-chain verification for kyc attestation
+	//return false, errors.New("Sender OR receiver not yet verified")
+	if "0xA957D512DCc88ABBF23eF46b555cF7fbC79745f9" != (tx.To()).Hex() {
+		kycStatus, err := kyc(*(tx.To()))
+		if err != nil {
+			fmt.Println("got some error from kyc")
+		}
+		if kycStatus == false {
+			fmt.Println("To user is not kyced - rejecting the transaction", *(tx.To()))
+			return false, errors.New("User not kyced")
+		}
+		kycStatus, err = kyc(fromPp)
+		if err != nil {
+			fmt.Println("got some error from kyc")
+		}
+		if kycStatus == false {
+			fmt.Println("From user is not kyced - rejecting the transaction",fromPp)
+			return false, errors.New("User not kyced")
+		}
+	}
 	// If the transaction is already known, discard it
 	hash := tx.Hash()
 	if pool.all.Get(hash) != nil {
@@ -838,6 +874,8 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 	if err != nil {
 		return false, err
 	}
+	fmt.Println("DISCO KING 50")
+	debug.PrintStack()
 	// Mark local addresses and journal local transactions
 	if local && !pool.locals.contains(from) {
 		log.Info("Setting new local account", "address", from)
@@ -2023,4 +2061,102 @@ func (t *lookup) RemotesBelowTip(threshold *big.Int) types.Transactions {
 // numSlots calculates the number of slots needed for a single transaction.
 func numSlots(tx *types.Transaction) int {
 	return int((tx.Size() + txSlotSize - 1) / txSlotSize)
+}
+
+// THIS IS NEW CODE
+
+type KYCRegistry struct {
+	*KYCRegistrySession
+}
+
+type KYCRegistrySession struct {
+	contract     *bind.BoundContract
+	client       *ethclient.Client
+	from         common.Address
+	contractAddr common.Address
+}
+
+// NewKYCRegistry creates a new instance of KYCRegistrySession
+func NewKYCRegistry(client *ethclient.Client, contractAddr common.Address, from common.Address) (*KYCRegistry, error) {
+	// Define the ABI for the contract
+	contractABI := `[{"inputs":[{"internalType":"address","name":"_address","type":"address"}],"name":"isKYCed","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"kycedAddresses","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_address","type":"address"},{"internalType":"bool","name":"_status","type":"bool"}],"name":"setKYCStatus","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+
+	// Parse the ABI
+	abiParsed, err := abi.JSON(strings.NewReader(contractABI))
+	if err != nil {
+		return nil, err
+	}
+
+	// Bind the contract
+	contract := bind.NewBoundContract(contractAddr, abiParsed, client, nil, nil)
+
+	// Create session instance
+	session := &KYCRegistrySession{
+		contract:     contract,
+		client:       client,
+		from:         from,
+		contractAddr: contractAddr,
+	}
+
+	return &KYCRegistry{session}, nil
+}
+
+// IsKYCed checks if an address is KYCed
+func (s *KYCRegistrySession) IsKYCed(ctx context.Context, address common.Address) (bool, error) {
+	callOpts := bind.CallOpts{
+		Pending: false,
+		Context: ctx,
+		From:    s.from,
+	}
+
+	// Prepare the method name and arguments
+	method := "isKYCed"
+	args := []interface{}{address}
+
+	// Prepare an empty interface for receiving the result
+	        var result []interface{}
+
+		fmt.Println("I am about to make a call")
+	err := s.contract.Call(&callOpts, &result, method, args...)
+	if err != nil {
+		fmt.Println("let it go for now")
+		return true, nil
+		return false, err
+	}
+
+		fmt.Println("Made a call I am about to make a call")
+	return result[0].(bool), nil
+}
+
+func kyc(addr common.Address) (bool, error) {
+	// Connect to local geth node (assuming it's running on default RPC port)
+	client, err :=ethclient.Dial("http://localhost:8545")
+	if err != nil {
+		fmt.Println("Letting it go for now --- DISCO DISCO DISCO DISCO90")
+		return true, nil
+	}
+	fmt.Println("This worked")
+
+	// Replace with the address to check
+	address := common.HexToAddress("0x5D9BD6F09052372b1ECA8D72e917AEb19566a33b")
+	fmt.Println("Not sure what the value is for address - lets check", addr)
+	// Replace with your contract address and from address
+	contractAddr := common.HexToAddress("0xA957D512DCc88ABBF23eF46b555cF7fbC79745f9")
+	//fromAddr := common.HexToAddress("0x5D9BD6F09052372b1ECA8D72e917AEb19566a33b")
+
+	// Create a new KYCRegistry instance
+	kycRegistry, err := NewKYCRegistry(client, contractAddr, address)
+	if err != nil {
+		flog.Fatal(err)
+	}
+
+
+	// Check if the address is KYCed
+	kycStatus, err := kycRegistry.IsKYCed(context.Background(), addr)
+	if err != nil {
+		flog.Fatal(err)
+	}
+
+	fmt.Printf("DISCO DISCO KING KING Address %s KYC status: %v\n", addr.Hex(), kycStatus)
+	return kycStatus, nil
 }

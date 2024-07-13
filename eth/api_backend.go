@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+	   "runtime/debug"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -301,6 +302,8 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 		if err != nil {
 			return err
 		}
+	fmt.Println("DISCO DISCO DISCO !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+	debug.PrintStack()
 		if err := b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
 			return err
 		}
